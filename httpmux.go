@@ -17,12 +17,12 @@ type (
 	Tree struct {
 		prefix string            // prefix for all paths
 		mw     []Middleware      // list of mw set by Use
-		routes map[string]*route // map of method to route for subtrees
+		routes map[string]*route // map of pattern to route for subtrees
 		router *httprouter.Router
 	}
 
 	route struct {
-		Pattern string
+		Method  string
 		Handler httprouter.Handle
 	}
 
@@ -157,7 +157,7 @@ func (t *Tree) Handle(method, pattern string, f http.Handler) {
 	if len(pattern) > 1 && pattern[len(pattern)-1] == '/' {
 		p += "/"
 	}
-	t.routes[method] = &route{Pattern: p, Handler: ff}
+	t.routes[p] = &route{Method: method, Handler: ff}
 	t.router.Handle(method, p, ff)
 }
 
@@ -201,7 +201,7 @@ func (t *Tree) Use(f ...Middleware) {
 // handlers like NotFound and MethodNotAllowed are ignored by the
 // root tree in favor of its own configuration.
 func (t *Tree) Append(pattern string, subtree *Tree) {
-	for meth, route := range subtree.routes {
+	for pp, route := range subtree.routes {
 		f := func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 			ff := func(w http.ResponseWriter, r *http.Request) {
 				route.Handler(w, r, p)
@@ -210,8 +210,8 @@ func (t *Tree) Append(pattern string, subtree *Tree) {
 			ff = t.chain(ff)
 			ff(w, r)
 		}
-		pp := path.Join(t.prefix, pattern, route.Pattern)
-		t.router.Handle(meth, pp, f)
+		pp = path.Join(t.prefix, pattern, pp)
+		t.router.Handle(route.Method, pp, f)
 	}
 }
 
