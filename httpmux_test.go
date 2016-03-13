@@ -2,11 +2,14 @@ package httpmux
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"golang.org/x/net/context"
 )
 
 func TestTree(t *testing.T) {
@@ -72,34 +75,68 @@ func TestSubtree(t *testing.T) {
 
 }
 
-func testmw(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Hello", "world")
-		next.ServeHTTP(w, r)
+func testmw(want int) Middleware {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			p := Params(r).ByName("opt")
+			if p != "foobar" {
+				http.Error(w, "missing parameter: foobar",
+					http.StatusNotFound)
+				return
+			}
+			ctx := Context(r)
+			have, _ := ctx.Value("v").(int)
+			if want != have {
+				m := fmt.Sprintf("want=%d have=%d", want, have)
+				http.Error(w, m, http.StatusNotFound)
+				return
+			}
+			have++
+			ctx = context.WithValue(ctx, "v", have)
+			SetContext(ctx, r)
+			next.ServeHTTP(w, r)
+		}
 	}
 }
 
 func TestMiddleware(t *testing.T) {
-	mux := New()
-	mux.Use(testmw)
-	respc := make(chan bool, 1)
+	root := New()
+	root.Use(testmw(0))
+	root.Use(testmw(1))
 	f := func(w http.ResponseWriter, r *http.Request) {
-		respc <- w.Header().Get("X-Hello") == "world"
+		w.WriteHeader(http.StatusOK)
 	}
-	mux.GET("/", http.HandlerFunc(f))
+	root.GET("/:opt", http.HandlerFunc(f))
 	r := &http.Request{
 		Method: "GET",
-		URL:    &url.URL{Path: "/"},
+		URL:    &url.URL{Path: "/foobar"},
 	}
-	w := &httptest.ResponseRecorder{}
-	mux.ServeHTTP(w, r)
-	select {
-	case ok := <-respc:
-		if !ok {
-			t.Fatalf("Middleware not executed.")
-		}
-	default:
-		t.Fatalf("Handler not executed.")
+	w := &httptest.ResponseRecorder{Body: &bytes.Buffer{}}
+	root.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Middleware chain is broken: %s", w.Body.Bytes())
+	}
+}
+
+func TestMiddlewareSubtree(t *testing.T) {
+	root := New()
+	root.Use(testmw(0))
+	root.Use(testmw(1))
+	subtree := New()
+	subtree.Use(testmw(2))
+	f := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	subtree.GET("/:opt", http.HandlerFunc(f))
+	root.Append("/a", subtree)
+	r := &http.Request{
+		Method: "GET",
+		URL:    &url.URL{Path: "/a/foobar"},
+	}
+	w := &httptest.ResponseRecorder{Body: &bytes.Buffer{}}
+	root.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Middleware chain is broken: %s", w.Body.Bytes())
 	}
 }
 

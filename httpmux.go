@@ -22,7 +22,7 @@ type (
 
 	route struct {
 		Method  string
-		Handler httprouter.Handle
+		Handler http.HandlerFunc
 	}
 
 	// Middleware is an http handler that can optionally
@@ -138,23 +138,37 @@ func (t *Tree) PUT(pattern string, f http.HandlerFunc) { t.Handle("PUT", pattern
 
 // Handle registers a new request handler with the given method and pattern.
 func (t *Tree) Handle(method, pattern string, f http.Handler) {
-	f = t.chain(f.ServeHTTP)
-	ff := func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		ctx := context.WithValue(Context(r), paramsID, p)
-		SetContext(ctx, r)
-		f.ServeHTTP(w, r)
-	}
-	p := path.Join(t.prefix, pattern)
-	if len(pattern) > 1 && pattern[len(pattern)-1] == '/' {
-		p += "/"
-	}
-	t.routes[p] = &route{Method: method, Handler: ff}
-	t.router.Handle(method, p, ff)
+	t.HandleFunc(method, pattern, f.ServeHTTP)
 }
 
 // HandleFunc registers a new request handler with the given method and pattern.
 func (t *Tree) HandleFunc(method, pattern string, f http.HandlerFunc) {
-	t.Handle(method, pattern, f)
+	p := path.Join(t.prefix, pattern)
+	if len(pattern) > 1 && pattern[len(pattern)-1] == '/' {
+		p += "/"
+	}
+	ff := t.wrap(f.ServeHTTP)
+	t.routes[p] = &route{Method: method, Handler: f}
+	t.router.Handle(method, p, ff)
+}
+
+func (t *Tree) wrap(next http.HandlerFunc) httprouter.Handle {
+	next = t.chain(next)
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		if c, ok := r.Body.(*ctxBody); !ok {
+			c = &ctxBody{
+				ReadCloser: r.Body,
+				ctx:        context.Background(),
+			}
+			r.Body = c
+			defer func() {
+				r.Body = c.ReadCloser
+			}()
+		}
+		ctx := context.WithValue(Context(r), paramsID, p)
+		SetContext(ctx, r)
+		next(w, r)
+	}
 }
 
 // ServeFiles serves files from the given file system root.
@@ -185,23 +199,16 @@ func (t *Tree) Use(f ...Middleware) {
 	t.mw = append(t.mw, f...)
 }
 
-// Append appends a subtree to the tree under the given pattern. All
-// middleware from the root tree propagates to the subtree as well,
-// however, subtree's url parameters are not available to the root
-// tree's middleware. Also, subtree's configuration such as fallback
-// handlers like NotFound and MethodNotAllowed are ignored by the
-// root tree in favor of its own configuration.
+// Append appends a subtree to this tree, under the given pattern. All
+// middleware from the root tree propagates to the subtree. However,
+// the subtree's configuration such as fallback handlers like NotFound
+// and MethodNotAllowed are ignored by the root tree in favor of its own
+// configuration.
 func (t *Tree) Append(pattern string, subtree *Tree) {
 	for pp, route := range subtree.routes {
-		f := func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-			ff := func(w http.ResponseWriter, r *http.Request) {
-				route.Handler(w, r, p)
-			}
-			ff = t.chain(ff)
-			ff(w, r)
-		}
 		pp = path.Join(t.prefix, pattern, pp)
-		t.router.Handle(route.Method, pp, f)
+		f := subtree.chain(route.Handler)
+		t.router.Handle(route.Method, pp, t.wrap(f))
 	}
 }
 
@@ -216,29 +223,14 @@ type ctxBody struct {
 	ctx context.Context
 }
 
-// chain generates the middleware chain and appends f at the end. Wraps
-// f with a handler that creates a context.Background for the entire
-// chain, attaches it to the request.Body, and clears at the end. Also
-// handles the case of subtrees.
+// chain generates the middleware chain and appends f at the end.
 func (t *Tree) chain(f http.HandlerFunc) http.HandlerFunc {
 	var handler http.HandlerFunc
 	for i := len(t.mw) - 1; i >= 0; i-- {
 		handler = t.mw[i](f)
 		f = handler
 	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		if c, ok := r.Body.(*ctxBody); !ok {
-			c = &ctxBody{
-				ReadCloser: r.Body,
-				ctx:        context.Background(),
-			}
-			r.Body = c
-			defer func() {
-				r.Body = c.ReadCloser
-			}()
-		}
-		f(w, r)
-	}
+	return f
 }
 
 // Context returns the context from the given request, or a new
