@@ -84,13 +84,17 @@ type (
 	}
 )
 
+// DefaultConfig is the default Tree configuration used by New.
+var DefaultConfig = Config{
+	RedirectTrailingSlash:  true,
+	RedirectFixedPath:      true,
+	HandleMethodNotAllowed: true,
+}
+
 // New creates and initializes a new Tree using default settings.
 func New() *Tree {
-	return NewTree(&Config{
-		RedirectTrailingSlash:  true,
-		RedirectFixedPath:      true,
-		HandleMethodNotAllowed: true,
-	})
+	c := DefaultConfig
+	return NewTree(&c)
 }
 
 // NewTree creates and initializes a new Tree with the given config.
@@ -148,7 +152,7 @@ func (t *Tree) HandleFunc(method, pattern string, f http.HandlerFunc) {
 		p += "/"
 	}
 	ff := t.wrap(f.ServeHTTP)
-	t.routes[p] = &route{Method: method, Handler: f}
+	t.routes[pattern] = &route{Method: method, Handler: f}
 	t.router.Handle(method, p, ff)
 }
 
@@ -201,9 +205,9 @@ func (t *Tree) Use(f ...Middleware) {
 
 // Append appends a subtree to this tree, under the given pattern. All
 // middleware from the root tree propagates to the subtree. However,
-// the subtree's configuration such as fallback handlers like NotFound
-// and MethodNotAllowed are ignored by the root tree in favor of its own
-// configuration.
+// the subtree's configuration such as prefix and fallback handlers,
+// like NotFound and MethodNotAllowed, are ignored by the root tree
+// in favor of its own configuration.
 func (t *Tree) Append(pattern string, subtree *Tree) {
 	for pp, route := range subtree.routes {
 		pp = path.Join(t.prefix, pattern, pp)

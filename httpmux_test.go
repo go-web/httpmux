@@ -53,7 +53,9 @@ func TestSubtree(t *testing.T) {
 			next(w, r)
 		}
 	})
-	tree := New()
+	c := DefaultConfig
+	c.Prefix = "/ignore-me"
+	tree := NewTree(&c)
 	tree.GET("/foobar", func(w http.ResponseWriter, r *http.Request) {
 		if w.Header().Get("X-Hello") == "world" {
 			w.WriteHeader(http.StatusOK)
