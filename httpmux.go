@@ -85,9 +85,13 @@ type (
 	}
 )
 
-// New creates and initializes a new Tree.
+// New creates and initializes a new Tree using default settings.
 func New() *Tree {
-	return NewTree(&Config{})
+	return NewTree(&Config{
+		RedirectTrailingSlash:  true,
+		RedirectFixedPath:      true,
+		HandleMethodNotAllowed: true,
+	})
 }
 
 // NewTree creates and initializes a new Tree with the given config.
