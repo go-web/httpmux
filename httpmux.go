@@ -2,14 +2,13 @@
 package httpmux
 
 import (
+	"io"
 	"net/http"
 	"path"
 	"strings"
 
 	"github.com/julienschmidt/httprouter"
 	"golang.org/x/net/context"
-
-	"github.com/go-web/httpctx"
 )
 
 type (
@@ -137,25 +136,13 @@ func (t *Tree) POST(pattern string, f http.HandlerFunc) { t.Handle("POST", patte
 // PUT is a shortcut for mux.Handle("PUT", path, handle)
 func (t *Tree) PUT(pattern string, f http.HandlerFunc) { t.Handle("PUT", pattern, f) }
 
-// chain generates the middleware chain and appends f at the end.
-func (t *Tree) chain(f http.HandlerFunc) http.HandlerFunc {
-	var handler http.HandlerFunc
-	for i := len(t.mw) - 1; i >= 0; i-- {
-		handler = t.mw[i](f)
-		f = handler
-	}
-	return f
-}
-
 // Handle registers a new request handler with the given method and pattern.
 func (t *Tree) Handle(method, pattern string, f http.Handler) {
 	f = t.chain(f.ServeHTTP)
 	ff := func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		ctx := httpctx.Get(r)
-		ctx = context.WithValue(ctx, paramsID, p)
-		httpctx.Set(r, ctx)
+		ctx := context.WithValue(Context(r), paramsID, p)
+		SetContext(ctx, r)
 		f.ServeHTTP(w, r)
-		httpctx.Clear(r)
 	}
 	p := path.Join(t.prefix, pattern)
 	if len(pattern) > 1 && pattern[len(pattern)-1] == '/' {
@@ -209,7 +196,6 @@ func (t *Tree) Append(pattern string, subtree *Tree) {
 		f := func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 			ff := func(w http.ResponseWriter, r *http.Request) {
 				route.Handler(w, r, p)
-				httpctx.Clear(r)
 			}
 			ff = t.chain(ff)
 			ff(w, r)
@@ -222,4 +208,64 @@ func (t *Tree) Append(pattern string, subtree *Tree) {
 // ServeHTTP implements the http.Handler interface.
 func (t *Tree) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t.router.ServeHTTP(w, r)
+}
+
+// ctxBody is the object we save in the request's Body field.
+type ctxBody struct {
+	io.ReadCloser
+	ctx context.Context
+}
+
+// chain generates the middleware chain and appends f at the end. Wraps
+// f with a handler that creates a context.Background for the entire
+// chain, attaches it to the request.Body, and clears at the end. Also
+// handles the case of subtrees.
+func (t *Tree) chain(f http.HandlerFunc) http.HandlerFunc {
+	var handler http.HandlerFunc
+	for i := len(t.mw) - 1; i >= 0; i-- {
+		handler = t.mw[i](f)
+		f = handler
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c, ok := r.Body.(*ctxBody); !ok {
+			c = &ctxBody{
+				ReadCloser: r.Body,
+				ctx:        context.Background(),
+			}
+			r.Body = c
+			defer func() {
+				r.Body = c.ReadCloser
+			}()
+		}
+		f(w, r)
+	}
+}
+
+// Context returns the context from the given request, or a new
+// context.Background if it doesn't exist.
+func Context(r *http.Request) context.Context {
+	if c, ok := r.Body.(*ctxBody); ok {
+		return c.ctx
+	}
+	return context.Background()
+}
+
+// SetContext updates the given context in the request if the request
+// has been previously instrumented by httpmux.
+func SetContext(ctx context.Context, r *http.Request) {
+	if c, ok := r.Body.(*ctxBody); ok {
+		c.ctx = ctx
+	}
+}
+
+type paramsType int
+
+var paramsID paramsType
+
+// Params returns the httprouter.Params from the request context.
+func Params(r *http.Request) httprouter.Params {
+	if p, ok := Context(r).Value(paramsID).(httprouter.Params); ok {
+		return p
+	}
+	return httprouter.Params{}
 }

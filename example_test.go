@@ -9,7 +9,6 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/go-web/httpctx"
 	"github.com/go-web/httplog"
 	"github.com/go-web/httpmux"
 )
@@ -18,9 +17,9 @@ func authHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
 		if ok && u == "foobar" && p == "foobared" {
-			ctx := httpctx.Get(r)
+			ctx := httpmux.Context(r)
 			ctx = context.WithValue(ctx, "user", u)
-			httpctx.Set(r, ctx)
+			httpmux.SetContext(ctx, r)
 			next(w, r)
 			return
 		}
@@ -30,6 +29,8 @@ func authHandler(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func Example() {
+	// curl -i localhost:8080
+	// curl -i -XPOST --basic -u foobar:foobared localhost:8080/auth/login
 	root := httpmux.New()
 	l := log.New(os.Stderr, "[go-web] ", 0)
 	root.Use(httplog.ApacheCommonFormat(l))
@@ -40,7 +41,7 @@ func Example() {
 	{
 		auth.Use(authHandler)
 		auth.POST("/login", func(w http.ResponseWriter, r *http.Request) {
-			u := httpctx.Get(r).Value("user")
+			u := httpmux.Context(r).Value("user")
 			fmt.Fprintln(w, "hello,", u)
 		})
 	}

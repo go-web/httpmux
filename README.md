@@ -20,15 +20,16 @@ contention on heavily loaded systems. We use a different approach, which
 was stolen from [httpway](https://github.com/corneldamian/httpway), that
 hijacks the http.Request's Body field and replace it with an object that
 is an io.ReadCloser but also carries a [net/context](https://godoc.org/golang.org/x/net/context)
-object.
+object. This works well for middleware that wants to store arbitrary
+data in the request, and once it hits your handler, the context can
+be passed around to goroutines. It is automatically cleared at the
+end of the middleware chain.
 
 There's been discussions for adding context to the standard library but
 most options require changing or creating a new interface and/or
 function signature for http handlers. In httpmux we remain close to
 net/http aiming at being more pluggable and composable with existing
-code in the wild. Our [httpctx](https://github.com/go-web/httpctx)
-package works anywhere, for anyone, from net/http to httpmux to httprouter
-and so on.
+code in the wild.
 
 To make contexts more useful, httpmux provides the ability to register and
 chain wrapper handlers, middleware. Our implementation is based on blogs
