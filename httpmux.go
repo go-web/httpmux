@@ -84,6 +84,11 @@ type (
 	}
 )
 
+// Use appends f to the list of middlewares.
+func (c *Config) Use(f ...Middleware) {
+	c.Middleware = append(c.Middleware, f...)
+}
+
 // DefaultConfig is the default Tree configuration used by New.
 var DefaultConfig = Config{
 	RedirectTrailingSlash:  true,
