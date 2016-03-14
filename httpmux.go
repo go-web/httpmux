@@ -12,8 +12,8 @@ import (
 )
 
 type (
-	// Tree is the http request multiplexer backed by httprouter.Router.
-	Tree struct {
+	// Handler is the http request multiplexer backed by httprouter.Router.
+	Handler struct {
 		prefix string            // prefix for all paths
 		mw     []Middleware      // list of mw set by Use
 		routes map[string]*route // map of pattern to route for subtrees
@@ -30,9 +30,9 @@ type (
 	// the request or any other conditions.
 	Middleware func(next http.HandlerFunc) http.HandlerFunc
 
-	// Config is the Tree configuration.
+	// Config is the Handler configuration.
 	Config struct {
-		// Prefix is the prefix for all paths in the tree.
+		// Prefix is the prefix for all paths in the handler.
 		// Empty value is allowed and defaults to "/".
 		Prefix string
 
@@ -89,22 +89,22 @@ func (c *Config) Use(f ...Middleware) {
 	c.Middleware = append(c.Middleware, f...)
 }
 
-// DefaultConfig is the default Tree configuration used by New.
+// DefaultConfig is the default Handler configuration used by New.
 var DefaultConfig = Config{
 	RedirectTrailingSlash:  true,
 	RedirectFixedPath:      true,
 	HandleMethodNotAllowed: true,
 }
 
-// New creates and initializes a new Tree using default settings.
-func New() *Tree {
+// New creates and initializes a new Handler using default settings.
+func New() *Handler {
 	c := DefaultConfig
-	return NewTree(&c)
+	return NewHandler(&c)
 }
 
-// NewTree creates and initializes a new Tree with the given config.
-func NewTree(c *Config) *Tree {
-	t := &Tree{
+// NewHandler creates and initializes a new Handler with the given config.
+func NewHandler(c *Config) *Handler {
+	h := &Handler{
 		prefix: c.Prefix,
 		mw:     c.Middleware,
 		routes: make(map[string]*route),
@@ -114,55 +114,55 @@ func NewTree(c *Config) *Tree {
 	router.RedirectFixedPath = c.RedirectFixedPath
 	router.HandleMethodNotAllowed = c.HandleMethodNotAllowed
 	if c.NotFound != nil {
-		router.NotFound = t.chain(c.NotFound.ServeHTTP)
+		router.NotFound = h.chain(c.NotFound.ServeHTTP)
 	}
 	if c.MethodNotAllowed != nil {
-		router.MethodNotAllowed = t.chain(c.MethodNotAllowed.ServeHTTP)
+		router.MethodNotAllowed = h.chain(c.MethodNotAllowed.ServeHTTP)
 	}
 	router.PanicHandler = c.PanicHandler
-	t.router = router
-	return t
+	h.router = router
+	return h
 }
 
 // DELETE is a shortcut for mux.Handle("DELETE", path, handle)
-func (t *Tree) DELETE(pattern string, f http.HandlerFunc) { t.Handle("DELETE", pattern, f) }
+func (h *Handler) DELETE(pattern string, f http.HandlerFunc) { h.Handle("DELETE", pattern, f) }
 
 // GET is a shortcut for mux.Handle("GET", path, handle)
-func (t *Tree) GET(pattern string, f http.HandlerFunc) { t.Handle("GET", pattern, f) }
+func (h *Handler) GET(pattern string, f http.HandlerFunc) { h.Handle("GET", pattern, f) }
 
 // HEAD is a shortcut for mux.Handle("HEAD", path, handle)
-func (t *Tree) HEAD(pattern string, f http.HandlerFunc) { t.Handle("HEAD", pattern, f) }
+func (h *Handler) HEAD(pattern string, f http.HandlerFunc) { h.Handle("HEAD", pattern, f) }
 
 // OPTIONS is a shortcut for mux.Handle("OPTIONS", path, handle)
-func (t *Tree) OPTIONS(pattern string, f http.HandlerFunc) { t.Handle("OPTIONS", pattern, f) }
+func (h *Handler) OPTIONS(pattern string, f http.HandlerFunc) { h.Handle("OPTIONS", pattern, f) }
 
 // PATCH is a shortcut for mux.Handle("PATCH", path, handle)
-func (t *Tree) PATCH(pattern string, f http.HandlerFunc) { t.Handle("PATCH", pattern, f) }
+func (h *Handler) PATCH(pattern string, f http.HandlerFunc) { h.Handle("PATCH", pattern, f) }
 
 // POST is a shortcut for mux.Handle("POST", path, handle)
-func (t *Tree) POST(pattern string, f http.HandlerFunc) { t.Handle("POST", pattern, f) }
+func (h *Handler) POST(pattern string, f http.HandlerFunc) { h.Handle("POST", pattern, f) }
 
 // PUT is a shortcut for mux.Handle("PUT", path, handle)
-func (t *Tree) PUT(pattern string, f http.HandlerFunc) { t.Handle("PUT", pattern, f) }
+func (h *Handler) PUT(pattern string, f http.HandlerFunc) { h.Handle("PUT", pattern, f) }
 
 // Handle registers a new request handler with the given method and pattern.
-func (t *Tree) Handle(method, pattern string, f http.Handler) {
-	t.HandleFunc(method, pattern, f.ServeHTTP)
+func (h *Handler) Handle(method, pattern string, f http.Handler) {
+	h.HandleFunc(method, pattern, f.ServeHTTP)
 }
 
 // HandleFunc registers a new request handler with the given method and pattern.
-func (t *Tree) HandleFunc(method, pattern string, f http.HandlerFunc) {
-	p := path.Join(t.prefix, pattern)
+func (h *Handler) HandleFunc(method, pattern string, f http.HandlerFunc) {
+	p := path.Join(h.prefix, pattern)
 	if len(pattern) > 1 && pattern[len(pattern)-1] == '/' {
 		p += "/"
 	}
-	ff := t.wrap(f.ServeHTTP)
-	t.routes[pattern] = &route{Method: method, Handler: f}
-	t.router.Handle(method, p, ff)
+	ff := h.wrap(f.ServeHTTP)
+	h.routes[pattern] = &route{Method: method, Handler: f}
+	h.router.Handle(method, p, ff)
 }
 
-func (t *Tree) wrap(next http.HandlerFunc) httprouter.Handle {
-	next = t.chain(next)
+func (h *Handler) wrap(next http.HandlerFunc) httprouter.Handle {
+	next = h.chain(next)
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		if c, ok := r.Body.(*ctxBody); !ok {
 			c = &ctxBody{
@@ -192,38 +192,38 @@ func (t *Tree) wrap(next http.HandlerFunc) httprouter.Handle {
 //
 // To use the operating system's file system implementation, use
 // http.Dir: mux.ServeFiles("/src/*filepath", http.Dir("/var/www")).
-func (t *Tree) ServeFiles(pattern string, root http.FileSystem) {
+func (h *Handler) ServeFiles(pattern string, root http.FileSystem) {
 	if !strings.HasSuffix(pattern, "/*filepath") {
 		panic("pattern must end with /*filepath in path '" + pattern + "'")
 	}
 	fs := http.FileServer(root)
-	t.GET(pattern, func(w http.ResponseWriter, r *http.Request) {
+	h.GET(pattern, func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = Params(r).ByName("filepath")
 		fs.ServeHTTP(w, r)
 	})
 }
 
 // Use records the given middlewares to the internal chain.
-func (t *Tree) Use(f ...Middleware) {
-	t.mw = append(t.mw, f...)
+func (h *Handler) Use(f ...Middleware) {
+	h.mw = append(h.mw, f...)
 }
 
-// Append appends a subtree to this tree, under the given pattern. All
+// Append appends a handler to this handler, under the given pattern. All
 // middleware from the root tree propagates to the subtree. However,
 // the subtree's configuration such as prefix and fallback handlers,
 // like NotFound and MethodNotAllowed, are ignored by the root tree
 // in favor of its own configuration.
-func (t *Tree) Append(pattern string, subtree *Tree) {
+func (h *Handler) Append(pattern string, subtree *Handler) {
 	for pp, route := range subtree.routes {
-		pp = path.Join(t.prefix, pattern, pp)
+		pp = path.Join(h.prefix, pattern, pp)
 		f := subtree.chain(route.Handler)
-		t.router.Handle(route.Method, pp, t.wrap(f))
+		h.router.Handle(route.Method, pp, h.wrap(f))
 	}
 }
 
 // ServeHTTP implements the http.Handler interface.
-func (t *Tree) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	t.router.ServeHTTP(w, r)
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.router.ServeHTTP(w, r)
 }
 
 // ctxBody is the object we save in the request's Body field.
@@ -233,10 +233,10 @@ type ctxBody struct {
 }
 
 // chain generates the middleware chain and appends f at the end.
-func (t *Tree) chain(f http.HandlerFunc) http.HandlerFunc {
+func (h *Handler) chain(f http.HandlerFunc) http.HandlerFunc {
 	var handler http.HandlerFunc
-	for i := len(t.mw) - 1; i >= 0; i-- {
-		handler = t.mw[i](f)
+	for i := len(h.mw) - 1; i >= 0; i-- {
+		handler = h.mw[i](f)
 		f = handler
 	}
 	return f

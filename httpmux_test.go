@@ -55,9 +55,16 @@ func TestSubtree(t *testing.T) {
 	})
 	c := DefaultConfig
 	c.Prefix = "/ignore-me"
-	tree := NewTree(&c)
+	c.Use(func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("X-Hello", h.Get("X-Hello")+"z")
+			next(w, r)
+		}
+	})
+	tree := NewHandler(&c)
 	tree.GET("/foobar", func(w http.ResponseWriter, r *http.Request) {
-		if w.Header().Get("X-Hello") == "world" {
+		if w.Header().Get("X-Hello") == "worldz" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
