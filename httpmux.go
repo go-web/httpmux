@@ -42,6 +42,10 @@ type (
 
 		// Middleware is the initial list of middlewares to be
 		// automatically assigned to all handlers.
+		//
+		// Note that middleware for the configurable handlers
+		// such as NotFound and MethodNotAllowed can only be
+		// configured here.
 		Middleware []Middleware
 
 		// Enables automatic redirection if the current route can't be matched but a
@@ -84,6 +88,8 @@ type (
 		// 500 (Internal Server Error).
 		// The handler can be used to keep your server from crashing because of
 		// unrecovered panics.
+		//
+		// No middleware is applied to the PanicHandler.
 		PanicHandler func(http.ResponseWriter, *http.Request, interface{})
 	}
 )
