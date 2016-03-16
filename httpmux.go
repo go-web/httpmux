@@ -28,7 +28,11 @@ type (
 	// Middleware is an http handler that can optionally
 	// call the next handler in the chain based on
 	// the request or any other conditions.
-	Middleware func(next http.HandlerFunc) http.HandlerFunc
+	Middleware func(next http.Handler) http.Handler
+
+	// MiddlewareFunc is an adapter for Middleware that takes
+	// handler functions.
+	MiddlewareFunc func(next http.HandlerFunc) http.HandlerFunc
 
 	// Config is the Handler configuration.
 	Config struct {
@@ -85,8 +89,18 @@ type (
 )
 
 // Use appends f to the list of middlewares.
-func (c *Config) Use(f ...Middleware) {
-	c.Middleware = append(c.Middleware, f...)
+func (c *Config) Use(mw ...Middleware) {
+	c.Middleware = append(c.Middleware, mw...)
+}
+
+// UseFunc appends f to the list of middlewares.
+func (c *Config) UseFunc(mw ...MiddlewareFunc) {
+	for _, f := range mw {
+		ff := func(next http.Handler) http.Handler {
+			return f(next.ServeHTTP)
+		}
+		c.Middleware = append(c.Middleware, ff)
+	}
 }
 
 // DefaultConfig is the default Handler configuration used by New.
@@ -203,9 +217,19 @@ func (h *Handler) ServeFiles(pattern string, root http.FileSystem) {
 	})
 }
 
-// Use records the given middlewares to the internal chain.
-func (h *Handler) Use(f ...Middleware) {
-	h.mw = append(h.mw, f...)
+// Use appends the given middlewares to the internal chain.
+func (h *Handler) Use(mw ...Middleware) {
+	h.mw = append(h.mw, mw...)
+}
+
+// UseFunc appends the given middlewares to the internal chain.
+func (h *Handler) UseFunc(mw ...MiddlewareFunc) {
+	for _, f := range mw {
+		ff := func(next http.Handler) http.Handler {
+			return f(next.ServeHTTP)
+		}
+		h.mw = append(h.mw, ff)
+	}
 }
 
 // Append appends a handler to this handler, under the given pattern. All
@@ -236,7 +260,7 @@ type ctxBody struct {
 func (h *Handler) chain(f http.HandlerFunc) http.HandlerFunc {
 	var handler http.HandlerFunc
 	for i := len(h.mw) - 1; i >= 0; i-- {
-		handler = h.mw[i](f)
+		handler = h.mw[i](f).ServeHTTP
 		f = handler
 	}
 	return f

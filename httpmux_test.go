@@ -12,7 +12,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-func TestTree(t *testing.T) {
+func TestHandler(t *testing.T) {
 	mux := New()
 	f := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -47,7 +47,7 @@ func TestTree(t *testing.T) {
 
 func TestSubtree(t *testing.T) {
 	root := New()
-	root.Use(func(next http.HandlerFunc) http.HandlerFunc {
+	root.UseFunc(func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Hello", "world")
 			next(w, r)
@@ -55,7 +55,7 @@ func TestSubtree(t *testing.T) {
 	})
 	c := DefaultConfig
 	c.Prefix = "/ignore-me"
-	c.Use(func(next http.HandlerFunc) http.HandlerFunc {
+	c.UseFunc(func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
 			h.Set("X-Hello", h.Get("X-Hello")+"z")
@@ -85,8 +85,8 @@ func TestSubtree(t *testing.T) {
 }
 
 func testmw(want int) Middleware {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
+	return func(next http.Handler) http.Handler {
+		f := func(w http.ResponseWriter, r *http.Request) {
 			p := Params(r).ByName("opt")
 			if p != "foobar" {
 				http.Error(w, "missing parameter: foobar",
@@ -105,6 +105,7 @@ func testmw(want int) Middleware {
 			SetContext(ctx, r)
 			next.ServeHTTP(w, r)
 		}
+		return http.HandlerFunc(f)
 	}
 }
 
