@@ -176,9 +176,8 @@ func (h *Handler) HandleFunc(method, pattern string, f http.HandlerFunc) {
 	if len(pattern) > 1 && pattern[len(pattern)-1] == '/' {
 		p += "/"
 	}
-	ff := h.wrap(f.ServeHTTP)
 	h.routes[pattern] = &route{Method: method, Handler: f}
-	h.router.Handle(method, p, ff)
+	h.router.Handle(method, p, h.wrap(f.ServeHTTP))
 }
 
 func (h *Handler) wrap(next http.HandlerFunc) httprouter.Handle {
